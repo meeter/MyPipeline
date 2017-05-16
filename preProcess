@@ -1,0 +1,192 @@
+## Jian Yu 
+## Aug-13-2014
+##
+## This script is used to remove multiple-hit reads and duplicates
+##
+
+NORMAL="\\033[0;39m" 
+RED="\\033[1;31m"
+BLUE="\\033[0;34m"
+
+## Check environment variable
+hash samtools 2>/dev/null || { echo >&2 "Samtools is required, but not installed.  Aborting."; exit 1; }
+
+function usage {
+    echo -e "$BLUE""Usage : ./preProcess [options] [-i input.bam] [-o output.bam] [-t number of Threads]"
+    echo -e "$RED""Options"
+    echo -e "$BLUE""-m""$NORMAL" "remove multiple-hit reads"
+    echo -e "$BLUE""-d [int]""$NORMAL" "remove duplicates with in [int] bp"
+    echo -e "$BLUE""-y""$NORMAL" "[default:Y] remove reads in Y-choromosome"
+    echo -e "$BLUE""-t""$NORMAL" "[default:1]number of Threads to use in samtools"
+    echo -e "$BLUE""-h""$NORMAL" "<help>"
+    exit;
+}
+
+if [ $# == 0 ]
+then
+    usage
+    exit
+fi
+## Get options
+set -- $(getopt :i:o:t:hmd: "$@")
+while [ $# -gt 0 ]
+do
+    case "$1" in
+	(-i) input=$2; shift;;
+	(-o) output=$2; shift;;
+	(-t) threads=$2; shift;;
+	(-d) RM_DUP="$2"; shift;;
+	(-y) RM_Y=$2; shift;;
+	 -m) RM_MULTI="Y"
+		;;
+	(-h) usage;;
+	(--) shift; break;;
+	(-*) echo "$0: error - unrecognized option $1" 1>&2; exit 1;;
+	(*)  break;;
+    esac
+    shift
+done
+
+## Check options
+if [ -z "$RM_DUP" -a -z "$RM_MULTI" ]; then  #check -m -d
+    echo "You must specify at least one option"
+    exit
+fi
+#if [ -z "$RM_Y" ]; then  #check output file option
+#    RM_Y=Y
+#    exit
+#fi
+if [ -z "$RM_Y" ]; then   #check if RM_Y
+	RM_Y="Y"
+fi
+if [ -z "$input" ]; then   #check input file option
+    echo "You must specify input file with -i option"
+    exit
+fi
+if [ -z "$threads" ]; then   #check input file option
+    threads=1	
+fi
+if [ -z "$output" ]; then  #check output file option
+    echo "You must specify output with -o option"
+    exit
+fi
+if [ ! -r $input ]; then  #check if input file exists
+	echo "Input file does not exist, Aborting..."
+	exit
+fi
+if [ -r "$output" ]; then #delete existed output file
+    rm $output
+fi
+	
+echo -e "$BLUE""INPUT=$input OUTPUT=$output REMOVE_ChrY=$RM_Y REMOVE_DUPLICATES=$RM_DUP REMOVE_MULTI-HIT_READS=$RM_MULTI NUMBER_OF_THREADS=$threads""$NORMAL"
+num_input=`samtools view -c $input`
+#input=`basename $input`
+
+## Remove Multiple-hit reads
+if [ $RM_MULTI ]; then
+	if [ ! -d .temp ]; then
+		 mkdir .temp
+	fi
+	multi=`basename $input | sed 's/.bam/_multi.txt/'`
+	echo -e "$RED""Generating Reads ID with Multiple Hits...""$NORMAL" 
+	#samtools view $input | fgrep "XS:i" | cut -f 1 > .temp/$multi	
+	#samtools view $input |cut -f1|sort|uniq -c|sort -k1nr|awk '{if ($1~/^2/) print $2}' > .temp/$multi
+	samtools view $input |cut -f1|sort|uniq -c|awk '{if ($1~/^2/) print $2}' > .temp/$multi
+	echo -e "$RED""Done, Removing Reads...""$NORMAL"
+	num_input=`samtools view -c $input`
+	if [ ! $RM_DUP ]; then  #if no need to remove dup, output filename for sort
+		samtools view -h $input | fgrep -vf .temp/$multi | samtools view -Sb - > .temp/nodup_`basename $input`
+		temp=".temp/nodup_`basename $input`"
+		num_noMulti=`samtools view -c $temp`
+	fi
+	
+	if [ $RM_DUP ]; then #if need to remove dup, output filename for remove duplicates
+		UniqInput=uniq_`basename $input`
+		samtools view -h $input | fgrep -vf .temp/$multi | samtools view -Sb - > .temp/$UniqInput
+		num_noMulti=`samtools view -c .temp/$UniqInput`
+	fi
+fi
+
+## Remove Duplicate Reads
+if [ $RM_DUP ]; then
+	if [ ! -d .temp ]; then
+        	mkdir .temp
+	fi
+	echo -e "$RED""Begin to Remove Duplication reads...""$NORMAL"
+	#split into plus and minus
+	if [ ! $RM_MULTI ]; then #if not remove multipe-hit reads previously, input file directly
+		plus=`basename $input| sed 's/.bam/_plus.bam/'`
+		minus=`basename $input | sed 's/.bam/_minus.bam/'`
+		samtools view -hb -F16  $input  > .temp/$plus
+		samtools view -hb -f16 $input > .temp/$minus
+	fi
+	if [ $RM_MULTI ]; then #if already remove multipe-hit reads previously, input temp file
+                plus=`basename $UniqInput | sed 's/.bam/_plus.bam/'`
+	        minus=`basename $UniqInput | sed 's/.bam/_minus.bam/'`
+		samtools view -hb -F16 .temp/$UniqInput > .temp/$plus
+		samtools view -hb -f16 .temp/$UniqInput > .temp/$minus
+	fi
+	echo -e "$RED""Split data into Plus/Minus Reads...""$NORMAL"
+	#sort bam file
+	samtools sort -@ $threads .temp/$plus .temp/$plus.sorted
+	mv .temp/$plus.sorted.bam .temp/$plus
+	num_plus=`samtools view -c .temp/$plus`
+	echo -e "$RED""Plus Reads Generated""$NORMAL"
+	samtools sort -@ $threads .temp/$minus .temp/$minus.sorted
+	mv .temp/$minus.sorted.bam .temp/$minus
+	num_minus=`samtools view -c .temp/$minus`
+	echo -e "$RED""Minus Reads Generated""$NORMAL" 
+	#remove duplication
+	dupfile_plus=`basename $plus | sed 's/_plus.bam/_plus_dup.txt/'` #plus strand
+	#samtools view .temp/$plus|awk '{read[NR]=$0;start[NR]=$4;  if((sqrt(($4-start[NR-1])*($4-start[NR-1]))<=RM_DUP)) print read[NR-1]}' RM_DUP="$RM_DUP" > .temp/$dupfile_plus 
+	#samtools view .temp/$plus|awk '{start[NR]=$4;ID[NR]=$1;  if((sqrt(($4-start[NR-1])*($4-start[NR-1]))<=RM_DUP)) print ID[NR-1],start[NR-1]}' RM_DUP="$RM_DUP" > .temp/$dupfile_plus 
+	samtools view -h .temp/$plus |awk -v RM_DUP="$RM_DUP" 'BEGIN {dupIndex=1} {start[NR]=$4;  if (NF==3) print; else if ( sqrt( ($4-start[NR-1])*($4-start[NR-1]) ) > RM_DUP) {print $0; dupIndex=NR};\
+		if ( sqrt( ($4-start[NR-1])*($4-start[NR-1]) ) <= RM_DUP ) { \
+		if ( sqrt( ($4-start[dupIndex])*($4-start[dupIndex]) ) > RM_DUP) {print $0;dupIndex=NR} \
+	}  }' | samtools view -Sb - > .temp/nodup_$plus
+	#samtools view -h .temp/$plus|fgrep -vf .temp/$dupfile_plus | samtools view -Sb - >  .temp/nodup_$plus
+	num_plus_noDup=`samtools view -c .temp/nodup_$plus`
+	echo -e "$RED""Duplciates removed in Plus Reads""$NORMAL"
+	dupfile_minus=`basename $minus | sed 's/_minus.bam/_minus_dup.txt/'` #minus strand
+	#samtools view .temp/$minus|awk '{read[NR]=$0;start[NR]=$4; if((sqrt(($4-start[NR-1])*($4-start[NR-1]))<=RM_DUP)) print read[NR-1]}' RM_DUP="$RM_DUP" > .temp/$dupfile_minus               
+	samtools view -h .temp/$minus |awk -v RM_DUP="$RM_DUP" 'BEGIN {dupIndex=1} {start[NR]=$4;  if (NF==3) print; else if ( sqrt( ($4-start[NR-1])*($4-start[NR-1]) ) > RM_DUP) {print $0; dupIndex=NR};\
+                if ( sqrt( ($4-start[NR-1])*($4-start[NR-1]) ) <= RM_DUP ) { \
+                if ( sqrt( ($4-start[dupIndex])*($4-start[dupIndex]) ) > RM_DUP) {print $0;dupIndex=NR} \
+        }  }' | samtools view -Sb - > .temp/nodup_$minus
+	#samtools view -h .temp/$minus|fgrep -vf .temp/$dupfile_minus | samtools view -Sb - >  .temp/nodup_$minus
+	num_minus_noDup=`samtools view -c .temp/nodup_$minus`
+	echo -e "$RED""Duplciates removed in Minus Reads""$NORMAL"
+	#merge bam files
+	samtools merge -@ $threads -f .temp/nodup_`basename $input` .temp/nodup_$plus .temp/nodup_$minus
+	echo -e "$RED""Plus/ Minus Reads Merged""$NORMAL"
+fi	
+#sort merged bam file
+samtools sort -@ $threads .temp/nodup_`basename $input` .temp/nodup_sorted.`basename $input|sed 's/.bam//'`
+echo -e "$RED""Sorting complete""$NORMAL"
+#check chromosome name, add prefix "chr" if not included (when using ref fasta from ensembl)
+samtools view -h .temp/nodup_sorted.`basename $input` | awk '{OFS="\t"; if (NF == 3 && $2 ~/SN/ && $2 !~/chr/) {sub(/SN:/,"SN:chr")};if ($1 !~/@PG/ && $3 !~/chr/ && NF >4) {$3="chr"$3};if ($2 ~/chrMT/ || $3 ~/chrMT/) {sub(/chrMT/,"chrM")}; print}' |samtools view -Sb - > $output 
+#mv .temp/nodup_sorted.$input.bam $output
+
+#####Remove Reads in chrY
+if [ $RM_Y == Y ]; then
+	echo  -e "$RED""Removing reads in ChrY""$NORMAL"
+	outputTemp=`basename $output`
+	samtools view -h $output|awk '{OFS="\t"; if ($2 !~ /chrY/ && $3 !~ /chrY/) print}'|samtools view -Sb - > .temp/$outputTemp
+	mv .temp/$outputTemp $output
+fi
+
+echo -e "$RED""Preprocessing Report:"
+echo -e "$BLUE"$num_input "$NORMAL""reads in input file"
+if [ $RM_MULTI ]; then
+	echo -e "$BLUE"`echo $num_input-$num_noMulti|bc`"$NORMAL" "reads removed as multiple hitting"
+fi
+if [ $RM_DUP ]; then
+	echo -e "$BLUE"`echo $num_plus-$num_plus_noDup|bc`"$NORMAL" "reads removed as duplicates in plus strand"
+	echo -e "$BLUE"`echo $num_minus-$num_minus_noDup|bc`"$NORMAL" "reads removed as duplicates in minus strand"
+fi
+echo -e "$BLUE"`samtools view -c $output `"$NORMAL" "reads remained after preprocessing"
+
+#if [ -d .temp ]; then
+#	rm -rf .temp
+#fi
+

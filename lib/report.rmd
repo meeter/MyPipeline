@@ -1,0 +1,227 @@
+---
+title: "Report of VISITs"
+output:
+  knitrBootstrap::bootstrap_document:
+    title: "Report of VISITs"
+    theme: readable
+    highlight: sunburst
+    theme.chooser: TRUE
+    highlight.chooser: TRUE
+    menu: FALSE	
+date: '`r format(Sys.time(), "%a %b %d %X %Y")`'
+params:
+  number: 20
+  info: .
+  inclusion: 0
+  threads: 10
+---
+
+# QC
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=FALSE)
+```
+
+## MDS Plot
+```{r MDS, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, bootstrap.thumbnail.size = 'col-md-8'}
+if (file.exists("qc.RData")) {
+getwd()
+load("qc.RData")
+library(ggplot2)
+ggplot(batch.vsd.pca, aes(PC1, PC2, color=cell_type)) +
+        geom_point(size=3) +
+        xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+        ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+        geom_text(aes(label = Label),hjust=0.25, vjust=-0.5, size=3, show_guide = F) +
+        ggtitle("PCA Plot") +
+        theme(plot.title=element_text(size=14), axis.title.y=element_text(size=14), axis.title.x=element_text(size=14),
+        title=element_text(size=12, face="bold"), legend.text=element_text(size=10),axis.line = element_line(colour = "black")) 
+} else {
+message("qc.RData not found")
+}
+```
+
+
+## Saturation Plot
+```{r Saturation, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10,bootstrap.thumbnail.size = 'col-md-8'}
+if (file.exists("qc.RData")) {
+ggplot(data=nonhit_long, aes(x=Proportion, y=value, colour = variable, linetype=SampleType)) +
+        geom_line(size=2) +
+        xlab("Proportion of Reads") +
+        ylab("Hit Genes %") +
+        ggtitle("Saturation Plot") +
+        theme(plot.title=element_text(size=20), axis.title.y=element_text(size=14), axis.title.x=element_text(size=14),
+        title=element_text(size=20, face="bold"), legend.text=element_text(size=10),axis.line = element_line(colour = "black"))
+} else {
+	message("qc.RData not found")
+}
+```
+
+## Manhattan Plot
+```{r Manhattan, eval=TRUE, echo=FALSE, warning=FALSE, bootstrap.show.output=FALSE, fig.width=16,bootstrap.thumbnail.size = 'col-md-8'}
+if (file.exists("qc.RData")) {
+library(edgeR)
+Count.rpkm <- rpkm(Count[,6:ncol(Count)], gene.length=abs(Count[,2] - Count[,3]), normalized.lib.sizes=F, log=T)
+Count.tpm <- Count.rpkm
+for (i in 1:ncol(Count.tpm) ) {
+       Count.tpm[,i] <- Count.rpkm[,i]/apply(Count.rpkm, 2, sum)[i]*10^6
+}
+lapply(1:ncol(Count.tpm), function(i) {
+        man.rpkm <- cbind(Count[,4], Count[,1:2], Count.rpkm[,i])
+        colnames(man.rpkm) <- c("SNP","CHR","BP","P")
+        man.rpkm$CHR <- gsub("chr", "", man.rpkm$CHR)
+        ggplot(man.rpkm, aes(x=CHR,y=P,col=CHR)) +
+        geom_point(position = position_jitter(w = 0.4, h = 0.1)) +
+        geom_abline(intercept = median(man.rpkm$P), slope = 0) +
+        ggtitle(Label[i]) +
+        ylim(-0.1,max(man.rpkm$P)) +
+        ylab("RPKM") +
+        theme(plot.title=element_text(size=20), axis.title.y=element_text(size=14), axis.title.x=element_text(size=14),legend.position="none",
+        title=element_text(size=20, face="bold"), legend.text=element_text(size=10),axis.line = element_line(colour = "black"))
+        }
+)
+} else {
+message("qc.RData not found")
+}
+```
+
+## Coverage Plot
+```{r Coverage, eval=TRUE, echo=FALSE, warning=FALSE, bootstrap.show.output=FALSE, bootstrap.thumbnail.size = 'col-md-8'}
+knitr::include_graphics("coverage.avgprof.png")
+#<img src="coverage.avgprof.png" height="540px" width="900px" />
+```
+
+# Results
+## Top Genes/Transcripts
+```{r, table, eval=TRUE, results='asis', echo=FALSE}
+if (file.exists("gene.RData")) {
+load("gene.RData")
+if (exists("Eff.res")){
+  knitr::kable(Eff.res[order(Eff.res$sumz_fdr),][1:params$number,])
+ } else {
+  knitr::kable(data.filtered[order(data.filtered$sumz_fdr),][1:params$number,c(-2:-5)]) 
+ }
+} else {
+message("gene.RData not found")
+}
+height <- nrow(exp_info)/3*4+2
+```
+
+## SigGene Plot
+```{r, siggene, eval=TRUE, echo=FALSE, message=TRUE, warning=FALSE,  bootstrap.show.output=TRUE, dev='png', fig.width=12, fig.height=height, bootstrap.thumbnail.size = 'col-md-8'}
+library(biomaRt)
+library(BiocParallel)
+library(GenomeGraphs)
+#library(png)
+if (file.exists("gene.RData")) {
+if (exists("Eff.res")){
+  selected.sig <- Eff.res[order(Eff.res$sumz_fdr),]
+ } else {
+  selected.sig <- data.filtered[order(data.filtered$sumz_fdr),]
+}
+include=params$inclusion ##need from VISITs_gene
+threads=params$threads
+number <- params$number
+if (!is.na(grep("ENSG", selected.sig[1,1]) || grep("ENST", selected.sig[1,1]))) {
+biomart <- useMart("ensembl","hsapiens_gene_ensembl")
+} else if (!is.na(grep("ENSMUSG", selected.sig[1,1]) || grep("ENSMUST", selected.sig[1,1]))) { 
+biomart <- useMart("ensembl","mmusculus_gene_ensembl") 
+}
+for (x in 1:length(bedfile))  {
+bedfile[[x]]$V5 <- rnorm(nrow(bedfile[[x]]), mean=0, sd=0.1)
+}
+
+temp <- bplapply(1:number, function(i) {
+start = ifelse(selected.sig[i,"strand"] == "+", selected.sig[i,"start"] - include, selected.sig[i,"start"])
+end = ifelse(selected.sig[i,"strand"] == "-", selected.sig[i,"end"] + include, selected.sig[i,"end"])
+pList_plus <- lapply(1:length(bedfile), function(x) {
+makeBaseTrack(base = subset(bedfile[[x]], V6 == "+")[,2] , value = subset(bedfile[[x]],V6 == "+")[,5], strand = "+",
+        dp = DisplayPars(lwd = .2, color = x, ylim = c(-1,1)))
+})
+pList_minus <- lapply(1:length(bedfile), function(x) {
+makeBaseTrack(base = subset(bedfile[[x]], V6 == "-")[,2] , value = subset(bedfile[[x]],V6 == "-")[,5], strand = "-",
+        dp = DisplayPars(lwd = .2, color = x, ylim = c(-1,1)))
+})
+pList <- sapply(1:length(bedfile), function(x) {
+c(pList_plus[x], pList_minus[x])
+})
+pList$plus <- makeGeneRegion(chromosome = gsub("chr", "", as.character(selected.sig[i, "chr"])),
+        start = start, end = end, strand = "+",
+        biomart = biomart, dp = DisplayPars(plotId = F, idRotation = 0, cex = .4))
+pList$min <-    makeGeneRegion(chromosome = gsub("chr", "", as.character(selected.sig[i, "chr"])),
+        start = start, end = end, strand = "-",
+        biomart = biomart, dp = DisplayPars(plotId = F, idRotation = 0, cex = .4))
+pList$Axis <- makeGenomeAxis(dp = DisplayPars(byValue = 1e3, size= 2, add53 = T))
+names(pList)[1:(length(bedfile)*2)] <- paste(rep(unique(exp_info$SampleName),each=2), rep(c("+","-"), length(bedfile)), sep="_")
+return(pList)
+},BPPARAM = MulticoreParam(workers = as.numeric(threads))
+)
+names(temp) <- selected.sig$id[1:number]
+#print(temp[[1]])
+lapply(1:length(temp), function(i) {
+output_gene <- paste(paste("output/", paste(selected.sig[i,1], selected.sig$Gene_Symbol[i], selected.sig$chr[i], selected.sig$strand[i], sep="_"),sep=""), ".png", sep="")
+start = ifelse(selected.sig[i,"strand"] == "+", selected.sig[i,"start"] - include, selected.sig[i,"start"])
+end = ifelse(selected.sig[i,"strand"] == "-", selected.sig[i,"end"] + include, selected.sig[i,"end"])
+message(output_gene)
+#message("chr",i,":",start,"-",end)
+#png(output_gene, width=15, height=height, unit="in",res=300)
+print(gdPlot(temp[[i]], minBase = start, maxBase = end))
+#pdf(paste(selected.sig$Gene_Symbol[i],".pdf",sep=""), width=14, height=8)
+#gdPlot(temp[[i]], minBase = start, maxBase = end)
+#dev.off()
+#dev <- dev.off()
+}
+)
+}
+
+```
+
+## Bubble Plot
+```{r, bubble, eval=TRUE, results='asis', echo=FALSE, message=FALSE, warning=FALSE, fig.width=16, fig.height=10, bootstrap.thumbnail.size = 'col-md-8'}
+library(edgeR)
+if (file.exists("gene.RData")) {
+if (exists("Eff.res")){ ##for data with replicates
+  selected.sig <- Eff.res[order(Eff.res$sumz_fdr),][1:1000,]
+  selected.sig$rpkm <- rowMeans(rpkm(selected.sig[, 13:(ncol(Eff.res)-2)][c(1:(nrow(exp_info)/6), (nrow(exp_info)/6*2+1):(nrow(exp_info)/6*3+1))], 
+				     gene.length=selected.sig$end-selected.sig$start, log=F))
+  #selected.sig$fc <- 2^(selected.sig$Log2FC)
+ } else { ##for data wo replicates
+  selected.sig <- data.filtered[order(data.filtered$sumz_fdr),][1:1000,]
+  selected.sig$rpkm <- rowMeans(rpkm(selected.sig[, 13:(ncol(selected.sig)-2)][c(1:(nrow(exp_info)/6), (nrow(exp_info)/6*2+1):(nrow(exp_info)/6*3+1))], 
+				     gene.length=selected.sig$end-selected.sig$start, log=F))
+}  
+chr <- as.character(selected.sig$chr)
+label=unlist(sapply(1:nrow(selected.sig), function(x) {
+  if (is.na(selected.sig$Gene_Symbol[x])   | selected.sig$Gene_Symbol[x] == "") {
+    as.character(selected.sig$id[x])
+    } else {
+    as.character(selected.sig$Gene_Symbol[x])  
+    }
+  }
+))
+selected.sig$Sig <- c(rep("Sig", params$number), rep("nonSig", nrow(selected.sig) - params$number))
+selected.sig$Sig <- c(as.character(selected.sig$chr[1:params$number]), selected.sig$Sig[(params$number+1):nrow(selected.sig)])
+colour <- c("chr1"=rainbow(24)[1],"chr2"=rainbow(24)[2],"chr3"=rainbow(24)[3],"chr4"=rainbow(24)[4],"chr5"=rainbow(24)[5],"chr6"=rainbow(24)[6], "chr7"=rainbow(24)[7],
+	    "chr8"=rainbow(24)[8],"chr9"=rainbow(24)[9],"chr10"=rainbow(24)[10],"chr11"=rainbow(24)[11],"chr12"=rainbow(24)[12],"chr13"=rainbow(24)[13],
+	    "chr14"=rainbow(24)[14],"chr15"=rainbow(24)[15],"chr16"=rainbow(24)[16],"chr17"=rainbow(24)[17],"chr18"=rainbow(24)[18],"chr19"=rainbow(24)[19],
+	    "chr20"=rainbow(24)[20],"chr21"=rainbow(24)[21],"chr22"=rainbow(24)[22],"chrX"=rainbow(24)[23],"chrY"=rainbow(24)[24],"nonSig"="grey")
+#pdf("~/bubbleplot.pdf", height=6, width=16)
+ggplot(selected.sig,aes(x=chr, y=-log(sumz_fdr+(1e-300),10), size=rpkm, colour=factor(Sig))) +
+   scale_colour_manual(values=colour) + 
+   geom_point(alpha=0.75) +
+   annotate("text", x=chr[1:params$number], y=-log(selected.sig$sumz_fdr+(1e-300),10)[1:params$number], label = label[1:params$number],size=4,color=1,family="Times") +
+   scale_size_area(breaks=c(0.2, 3, 10), "Average Insertion (rpkm)", max_size=75) +
+   scale_x_discrete("Chromosome") + 
+   scale_y_continuous("-log10-based FDR",limits=c(0,-log(selected.sig[1,]$sumz_fdr+1e-300,10)+2)) +
+   theme(axis.text=element_text(size=12), legend.position="none", axis.title=element_text(size=14,face="bold"))
+#dev.off()
+} else {
+message("gene.RData not found")
+}
+```
+
+# Session Information
+```{r, sessionInfo, echo=FALSE} 
+params$info
+sessionInfo()
+```
+

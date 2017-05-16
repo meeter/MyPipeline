@@ -1,0 +1,17 @@
+# Tab-delimited File
+# 1st Column: Path and Filename
+# 2nd Column: always -1 
+# 3rd Column: sample name which  will be shown in the figures legend
+# 4rd Column: sample type which will be shown in different color in the figures
+# 5th Column: covariates (optional)
+FileName	Tag	SampleName	SampleType	Passage
+/cclab_nas/jiyu/mypipeline/asun/rawdata/selected/trim/bowtie2_mm10/processed_m_d0/ELAM4D5.bam	-1	ELAM4D5	Selected	4
+/cclab_nas/jiyu/mypipeline/asun/rawdata/selected/trim/bowtie2_mm10/processed_m_d0/ELAM5D5.bam	-1	ELAM5D5	Selected	5
+/cclab_nas/jiyu/mypipeline/asun/rawdata/selected/trim/bowtie2_mm10/processed_m_d0/ELAM8D5.bam	-1	ELAM8D5	Selected	8
+/cclab_nas/jiyu/mypipeline/asun/rawdata/selected/trim/bowtie2_mm10/processed_m_d0/ELAM9D5.bam	-1	ELAM9D5	Selected	9
+/cclab_nas/jiyu/mypipeline/asun/rawdata/selected/trim/bowtie2_mm10/processed_m_d0/ELAM10D5.bam	-1	ELAM10D5	Selected	10
+/cclab_nas/jiyu/mypipeline/asun/rawdata/ctrl/trim/bowtie2_mm10/processed_m_d0/ELAM4C.bam	-1	ELAM4C	Ctrl	4
+/cclab_nas/jiyu/mypipeline/asun/rawdata/ctrl/trim/bowtie2_mm10/processed_m_d0/ELAM5C.bam	-1	ELAM5C	Ctrl	5
+/cclab_nas/jiyu/mypipeline/asun/rawdata/ctrl/trim/bowtie2_mm10/processed_m_d0/ELAM8C.bam	-1	ELAM8C	Ctrl	8
+/cclab_nas/jiyu/mypipeline/asun/rawdata/ctrl/trim/bowtie2_mm10/processed_m_d0/ELAM9C.bam	-1	ELAM9C	Ctrl	9
+/cclab_nas/jiyu/mypipeline/asun/rawdata/ctrl/trim/bowtie2_mm10/processed_m_d0/ELAM10C.bam	-1	ELAM10C	Ctrl	10

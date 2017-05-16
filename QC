@@ -1,0 +1,121 @@
+# /bin/bash
+
+## This script is used to perform quality check for PhiT-seq data
+## Including PCA plot, Saturation curve, and Coverage plot (by ngsplot, Shen et al., 2014 BMC Genomics)
+## For the first two QC, invoke count.sh and qc.r
+## For the last QC, use ngs.plot.r
+
+NORMAL="\\033[0;39m"
+RED="\\033[1;31m"
+BLUE="\\033[0;34m"
+
+## Check environment variable
+hash bedtools 2>/dev/null || { echo >&2 "bedtools is required, but not installed.  Aborting."; exit 1; }
+hash Rscript 2>/dev/null || { echo >&2 "R is required, but not installed.  Aborting."; exit 1; }
+
+function usage {
+    echo -e "$BLUE""Usage : /PATH/TO/QC [-g hg38 or mm10] [-e 5 or 3] [-f ExperimentInfo file] [-a Annotation directory] [-i 2.5] [-o Output directory] [-h display this Help] [-v Display running info]"
+    echo -e "$RED""Options"
+    echo -e "$BLUE""-g""$NORMAL" "Species Name, hg38 or mm10"
+    echo -e "$BLUE""-e""$NORMAL" "[Default: 5] Count 5' end or 3' end insertion sites (Optional)"
+    echo -e "$BLUE""-f""$NORMAL" "Experiment Information File including BAM filename, sample name and sample type"
+    echo -e "$BLUE""-a""$NORMAL" "Annotation folder where recompiled GENE MODEL is"
+    echo -e "$BLUE""-i""$NORMAL" "[Default: 0] Including iKb upstream when performing QC, expect for the coverage plot, +/- 5kb TSS is always used (Optional)"
+    echo -e "$BLUE""-o""$NORMAL" "Output folder; If sucessfully runned, three pdf file will be generated"
+    echo -e "$BLUE""-v""$NORMAL" "Display Detailed Running information"
+    exit;
+}
+
+## Display Help
+if [ $# == 0 ]
+then
+        usage
+        exit
+fi
+
+case $1 in
+--h) usage ;;
+--help) usage ;;
+esac
+
+## Parse Argument
+set -- $(getopt :g:e:f:i:a:o:vh "$@")
+while [ $# -gt 0 ]
+do
+    case "$1" in
+	(-g) genome=$2; shift;;
+        (-e) end=$2; shift;;
+        (-f) input=$2; shift;;
+        (-i) inclusion=$2; shift;;
+        (-a) anno_dir=$2; shift;;
+        (-o) output=$2; shift;;
+        (-v) verbose=true;;
+        (-h) usage; exit;;
+        (--) shift; break;;
+        (-*) echo "$0: error - unrecognized option $1" 1>&2; exit 1;;
+        (*)  break;;
+    esac
+    shift
+done
+#echo $verbose
+## Check options
+if [ -z "$genome" ]; then   #check species name
+    echo "Must specify one of mm10/hg38 as species"
+    exit
+fi
+if [ -z "$end" ]; then   #check insertion site
+    end=5
+fi
+if [ -z "$inclusion" ]; then   #check insertion site
+    inclusion=0
+fi
+if [ ! -r "$input" ]; then  #check exp info
+    echo "Experiment Info file does not exist"
+    exit
+fi
+if [ ! -d "$output" ]; then  #check output folder option
+    echo "output directory does not exist"
+    exit
+fi
+if [ ! -d "$anno_dir" ]; then  #check annotation folder
+    echo "annotation directory does not exist"
+    exit
+fi
+if [ ! -r "$anno_dir/syntheticGeneModel.bed" ]; then  #check exon option
+    echo "Exon annotation file (bed/gff) does not exist, please check if file syntheticGeneModel.bed exists"
+    exit
+fi
+if [ ! -r "$anno_dir/IntronGeneModel.bed" ]; then  #check intron option
+    echo "Intron annotation file (bed/gff) does not exist, please check if file IntronGeneModel.bed exists"
+    exit
+fi
+if [ ! -r "$anno_dir/GeneIntervalModel.bed" ]; then  #check gene interval option
+        echo "Gene interval annotation does not exist, please check if file GeneIntervalModel.bed exists"
+        exit
+fi
+for bam in `awk '{if ($2 == -1 && $1 !~ /#/) print}' $input|cut -f1`
+do
+if [ ! -r "$bam" ]; then  #check gene interval option
+        echo $bam
+        echo "bam file specified in input file does not exist, please check"
+        exit
+	else
+	length=`samtools view $bam|head -1|awk '{print length($10)}'`
+fi
+done
+if [ ! -z $verbose ]; then
+        echo -e "$BLUE""GENOME=$genome END=$end INCLUSION=$inclusion INPUT=$input OUTPUT=$output ANNO_DIR=$anno_dir LENGTH=$length""$NORMAL"
+fi
+
+#For Coverage plot
+##For PCA and Saturation Plot
+if [ ! -z $verbose ]; then
+	bash COUNT -v -o $output -e $end -f $input -a $anno_dir -i $inclusion
+	Rscript lib/qc.r $input $output T
+	else
+	bash COUNT -o $output -e $end -f $input -a $anno_dir -i $inclusion 
+	Rscript lib/qc.r $input $output
+fi
+lib/ngs.plot.r -G $genome -R tss -C $input -O $output/coverage -L 5000 -FL $length -F protein_coding,pseudogene,lincRNA,miRNA,misc #-FL $length
+find  ./ -maxdepth 1 -name "*.cnt" -type f -delete
+

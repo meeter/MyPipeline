@@ -1,0 +1,4 @@
+ID	Assembly	Species	EnsVer	NPVer
+hg19	GRCh37	homo_sapiens	74.0	3.0
+hg38	GRCh38	homo_sapiens	76.0	3.0
+mm10	GRCm38	mus_musculus	75.0	3.0

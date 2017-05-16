@@ -1,0 +1,9 @@
+# Tab-delimited File
+# 1st Column: Full Filename
+# 2nd Column: always -1 
+# 3rd Column: sample name
+# 4rd Column: sample type
+# 5th Column: covariates (optional)
+FileName	Tag	SampleName	SampleType	
+testdata/test1/sel.bam	-1	sel	Selected
+testdata/test1/ctrl.bam	-1	ctrl	Ctrl

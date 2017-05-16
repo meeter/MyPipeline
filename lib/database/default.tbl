@@ -1,0 +1,16 @@
+Genome	DefaultDB	Region	DefaultFI1	DefaultFI2	DefaultFI3	PointLab	Flank
+hg19	ensembl	cgi	NA	ProximalPromoter	protein_coding	Left,Right	500
+hg19	ensembl	exon	chipseq	canonical	protein_coding	Acceptor,Donor	500
+hg19	ensembl	genebody	chipseq	NA	protein_coding	TSS,TES	2000
+hg19	ensembl	tss	chipseq	NA	protein_coding	TSS	2000
+hg19	ensembl	tes	chipseq	NA	protein_coding	TES	2000
+mm10	ensembl	cgi	NA	ProximalPromoter	protein_coding	Left,Right	500
+mm10	ensembl	exon	chipseq	canonical	protein_coding	Acceptor,Donor	500
+mm10	ensembl	genebody	chipseq	NA	protein_coding	TSS,TES	2000
+mm10	ensembl	tss	chipseq	NA	protein_coding	TSS	2000
+mm10	ensembl	tes	chipseq	NA	protein_coding	TES	2000
+hg38	ensembl	cgi	NA	ProximalPromoter	protein_coding	Left,Right	500
+hg38	ensembl	exon	chipseq	canonical	protein_coding	Acceptor,Donor	500
+hg38	ensembl	genebody	chipseq	NA	protein_coding	TSS,TES	2000
+hg38	ensembl	tss	chipseq	NA	protein_coding	TSS	2000
+hg38	ensembl	tes	chipseq	NA	protein_coding	TES	2000

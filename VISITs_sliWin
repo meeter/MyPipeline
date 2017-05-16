@@ -1,0 +1,239 @@
+##
+## This script is used to count inactivating insertions by sliding window. It takes the output from preProcess (optional if replicated and multiple-hit reads were not removed before), and invoke
+## one of SliWin_Ctrl.R and SliWin_noCtrl.R depending on if ctrl library is available
+##
+
+NORMAL="\\033[0;39m"
+RED="\\033[1;31m"
+BLUE="\\033[0;34m"
+
+## Check environment variable
+hash bedtools 2>/dev/null || { echo >&2 "bedtools is required, but not installed.  Aborting."; exit 1; }
+hash samtools 2>/dev/null || { echo >&2 "samtools is required, but not installed.  Aborting."; exit 1; }
+hash Rscript 2>/dev/null || { echo >&2 "R is required, but not installed.  Aborting."; exit 1; }
+
+function usage {
+    echo -e "$BLUE""Usage : ./VISITs_sliWin [-n Number of CPU used] [-p adjusted P] [-m Multiple test correction method] [-r minimum Reads number in each window for selected library] [-e specifiy 3/5 End insertion] [-w Window size] [-t sTep size] [-a Annotation] [-s Selected.bam] [-c Control.bam] [-i chromosome Info] [-o Output directory] [-v Verbose] [-h display this Help]"
+    echo -e "$RED""Options"
+    echo -e "$BLUE""-n""$NORMAL" "[Default: 1] Number of CPU used in statistcal test in R (Optional)"	
+    echo -e "$BLUE""-p""$NORMAL" "[Default: 1e-10] Adjusted p-value (Benjamini-Hochberg FDR) used in statistical test to select candidate genes (Optional)"
+    echo -e "$BLUE""-m""$NORMAL" "[Default: BH] Multiple tests correction, default is 'BH' (Benjamini & Hochberg); alternatives include 'holm', 'hochberg', 'BY' (Benjamini & Yekutieli) and 'bonferroni' (Optional)"
+    echo -e "$BLUE""-r""$NORMAL" "[Default: 1] Minimum reads number in each window for selected library (Optional)"
+    echo -e "$BLUE""-e""$NORMAL" "[Default: 5] Count 5' end or 3' end insertion sites (Optional)"
+    echo -e "$BLUE""-w""$NORMAL" "[Default: 10000] window size (bp) (Optional)"
+    echo -e "$BLUE""-t""$NORMAL" "[Default: 5000] step size (bp) (Optional)"
+    echo -e "$BLUE""-a""$NORMAL" "Annotation file, should be the GeneIntervalModel.bed in reference directory "$RED"(Mandatory)"$NORMAL""
+    echo -e "$BLUE""-i""$NORMAL" "A txt file composed of two columns: chromosome name and length seperated by tab (e.g., chr1	1000000); if not specified, scripts will try to retrieve information from bam file headers (Optional)"
+    echo -e "$BLUE""-s""$NORMAL" "Bam file from selected library "$RED"(Mandatory)"$NORMAL""
+    echo -e "$BLUE""-c""$NORMAL" "Bam file from control library (optional)"
+    echo -e "$BLUE""-o""$NORMAL" "Output folder which will include bed file of intersected insertion sites, list of siginiciant regions, and RData "$RED"(Mandatory)"$NORMAL""
+    echo -e "$BLUE""-v""$NORMAL" "print Verbose (Optional)"
+    echo -e "$BLUE""-h""$NORMAL" "<help>"
+    exit;
+}
+#Display Help
+if [ $# == 0 ]
+then
+        usage
+        exit
+fi
+
+case $1 in
+--h) usage ;;      
+--help) usage ;;
+esac
+
+set -- $(getopt :n:p:m:r:e:w:t:a:i:s:c:o:vh "$@")
+while [ $# -gt 0 ]
+do
+    case "$1" in
+	(-n) cores=$2; shift;;
+        (-p) fdr=$2; shift;;
+        (-m) method=$2; shift;;
+	(-r) reads=$2; shift;;
+        (-e) end=$2; shift;;
+	(-w) window=$2; shift;;
+	(-t) step=$2; shift;; 
+	(-a) anno=$2; shift;;
+	(-i) genome=$2; shift;;
+        (-s) selected=$2; shift;;
+        (-c) ctrl=$2; shift;;
+        (-o) output=$2; shift;;
+	(-v) verbose=true;;
+        (-h) usage;;
+        (--) shift; break;;
+        (-*) echo "$0: error - unrecognized option $1" 1>&2; exit 1;;
+        (*)  break;;
+    esac
+    shift
+done
+
+
+if [ -z "$cores" ]; then #check number of cpu cores
+    cores=1
+fi
+if [ -z "$fdr" ]; then   #check fdr
+    fdr=1e-10
+fi
+if [ -z "$method" ]; then #check method for multiple-test correction
+    method='BH'
+fi
+if [ -z "$reads" ]; then   #check minimum reads
+    reads=1
+fi
+if [ -z "$end" ]; then   #check insertion site
+    end=5
+fi
+if [ -z "$genome" ]; then   #check chromosome length
+	samtools view -H $selected |grep "chr" |cut -f2,3|sed -e "s/SN://g;s/LN://g" > $output/chromInfo.txt
+	genome=$output/chromInfo.txt
+fi
+if [ -z "$window" ]; then   #check window size
+     window=10000
+fi	
+if [ -z "$step" ]; then
+     step=5000
+fi
+if [ ! -r "$anno" ]; then #check species
+    echo "Specified annotation file does not exit"
+    #exit
+fi
+#if [ ! -r "$genome" ]; then  #check selected file option
+#    echo "Chromosome length  file does not exist"
+#    exit
+#fi
+if [ ! -r "$selected" ]; then  #check selected file option
+    echo "Specified selected library does not exist"
+    exit
+fi
+#if [ ! -r "$exclude" ]; then  #check excluded file option
+#    echo "Sepcified file does not exist"
+#    exit
+#fi
+if [ ! -d "$output" ]; then  #check output folder option
+    echo "output directory does not exist"
+   # exit
+fi
+
+
+echo -e "$BLUE""VISITs Counting by Sliding-Window Approach..."
+echo -e "CORES=$cores FDR=$fdr METHOD=$method END=$end MINIMUM READS=$reads WINDOW=$window STEP=$step ANNO=$anno SELECTED=$selected CTRL=$ctrl OUTPUT=$output CHROME_LEN=$genome""$NORMAL"
+
+##Get only 5'/3' Insertion Site
+if [ $end -eq 5 ]; then #keep only 5'-end for selected
+        selected_bed=`basename $selected | sed 's/.bam/.bed/'`
+        if [[ ! -r "$output/selected_bed" ]]; then
+		echo -e "$RED""Getting Independent Insertion Sites for Selected Library...""$NORMAL"
+		bedtools bamtobed -i $selected |awk '{OFS="\t";if ($6=="+"&&$1!~/\_/) {$3=$2;print};if ($6=="-"&&$1!~/\_/){$2=$3;print}}' > $output/$selected_bed
+        else 
+		echo -e "$RED""Independent Insertion Sites for Selected Library Already Existed, Skip""$NORMAL"
+	fi
+	if [[ ! -z "$ctrl" ]]; then
+		ctrl_bed=`basename $ctrl | sed 's/.bam/.bed/'`
+        	if [[  ! -r "$output/$ctrl_bed" ]]; then  #keep only 5'-end for selected       
+			echo -e "$RED""Getting Insertion Sites for Control Library...""$NORMAL"
+			bedtools bamtobed -i $ctrl |awk '{OFS="\t";if ($6=="+"&&$1!~/\_/) {$3=$2;print};if ($6=="-"&&$1!~/\_/){$2=$3;print}}' > $output/$ctrl_bed
+		else	
+			echo -e "$RED""Independent Insertion Sites for Control Library Existed, Skip""$NORMAL"
+		fi
+	fi
+fi
+if [ $end -eq 3 ]; then #keep only 3'-end for selected
+        selected_bed=`basename $selected | sed 's/.bam/.bed/'`
+        if [[ ! -r "$output/selected_bed" ]]; then
+		echo -e "$RED""Getting Independent Insertion Sites for Selected Library...""$NORMAL"
+		bedtools bamtobed -i $selected |awk '{OFS="\t";if ($6=="+"&&$1!~/\_/) {$2=$3;print};if ($6=="-"&&$1!~/\_/){$3=$2;print}}' > $output/$selected_bed
+       	else
+		echo -e "$RED""Independent Insertion Sites for Selected Library Already Existed, Skip""$NORMAL"
+	fi
+	if [[ ! -z "$ctrl" ]]; then
+		ctrl_bed=`basename $ctrl | sed 's/.bam/.bed/'`
+		if [[ ! -r "$output/$ctrl_bed" ]]; then #keep only 3'-end for ctrl
+                	echo -e "$RED""Getting Insertion Sites for Control Library...""$NORMAL"
+                	bedtools bamtobed -i $ctrl |awk '{OFS="\t";if ($6=="+"&&$1!~/\_/) {$2=$3;print};if ($6=="-"&&$1!~/\_/){$3=$2;print}}' > $output/$ctrl_bed
+                else
+			echo -e "$RED""Independent Insertion Sites for Control Library Existed, Skip""$NORMAL"        
+		fi
+	fi
+fi
+
+##Generating Bed Track file
+track_ctrl=track_$ctrl_bed #new ctrl track file name
+track_sel=track_$selected_bed #new selected track file name
+if [[ ! -r "$output/$track_sel.gz" ]]; then
+	echo -e "$RED""Generating Track file for Selected Library...""$NORMAL"
+	num_sel=`cat $output/$selected_bed|wc -l`
+	factor_sel=`echo "scale=9;1/1000000*$num_sel"|bc` #calculate CPM for selected
+	echo "track type=bed name='$selected_bed' description='selected library' visibility=4 color=204,0,0" > $output/$track_sel #genrating header
+	awk -v factor_sel="$factor_sel" '{OFS="\t";$4=factor_sel;print}' $output/$selected_bed >> $output/$track_sel  #generating selected track
+	gzip $output/$track_sel --fast
+else
+	echo -e "$RED""Track File for Selected Library Already Existed, Skip""$NORMAL"
+fi
+if [[ ! -r "$output/$track_ctrl.gz" ]]; then
+	echo -e "$RED""Generating Track file for Ctrl Library...""$NORMAL"
+	num_ctrl=`cat $output/$ctrl_bed|wc -l`
+	factor_ctrl=`echo "scale=9;1/1000000*$num_ctrl"|bc` #calculate CPM for ctrl
+	echo "track type=bed name='$ctrl_bed' description='ctrl library' visibility=4 color=0,0,204" > $output/$track_ctrl
+	awk -v factor_ctrl="$factor_ctrl" '{OFS="\t";$4=factor_ctrl;print}' $output/$ctrl_bed >> $output/$track_ctrl  #genearing ctrl track
+	gzip $output/$track_ctrl --fast
+else
+        echo -e "$RED""Track File for Ctrl Library Already Existed, Skip""$NORMAL"
+fi
+
+##Get Sliding window
+if [ ! -r "$output/slidingwindow_$window"_"$step.bed" ]; then
+	echo -e "$RED""Generating Sliding Window...""$NORMAL"
+	bedtools makewindows -g $genome -w $window -s $step > $output/slidingwindow_$window"_"$step.bed
+	else
+	echo -e "$RED""Sliding Window Already Exist, Skip""$NORMAL"
+fi
+
+##Count by sliding window for selected library (plus/minus speratedly)
+selected_plus=`basename $output/$selected_bed | sed "s/.bed/_$window"_"$step.plus_count.bed/"` 
+selected_minus=`basename $output/$selected_bed | sed "s/.bed/_$window"_"$step.minus_count.bed/"`
+if [ ! -r "$output/$selected_plus" ]; then
+	echo -e "$RED""Counting for Selected Library...""$NORMAL"
+	awk '{if (($6=="+")&&($2+$3!=0)) print $0}' $output/$selected_bed |coverageBed -a stdin -b $output/slidingwindow_$window"_"$step.bed > $output/$selected_plus 
+	awk '{if (($6=="-")&&($2+$3!=0)) print $0}' $output/$selected_bed |coverageBed -a stdin -b $output/slidingwindow_$window"_"$step.bed > $output/$selected_minus 
+	else
+	echo -e "$RED""Counting for Selected Library Already Existed, Skip""$NORMAL"
+fi
+
+##Count by sliding window for ctrl library, if exists (plus/minus speratedly)
+if [ ! -z "$ctrl" ]; then #with ctrl
+	ctrl_plus=`basename $output/$ctrl_bed | sed "s/.bed/_$window"_"$step.plus_count.bed/"` 
+	ctrl_minus=`basename $output/$ctrl_bed | sed "s/.bed/_$window"_"$step.minus_count.bed/"`
+	if [ ! -r "$output/$ctrl_plus" ]; then
+		echo -e "$RED""Counting for Ctrl library...""$NORMAL"
+		awk '{if (($6=="+")&&($2+$3!=0)) print $0}' $output/$ctrl_bed |coverageBed -a stdin -b $output/slidingwindow_$window"_"$step.bed > $output/$ctrl_plus 
+		awk '{if (($6=="-")&&($2+$3!=0)) print $0}' $output/$ctrl_bed |coverageBed -a stdin -b $output/slidingwindow_$window"_"$step.bed > $output/$ctrl_minus
+		else
+		echo -e "$RED""Counting for Ctrl Library Already Existed, Skip""$NORMAL"
+	fi
+fi
+##Count total number for Test in R
+echo -e "$RED""Counting Total Reads...""$NORMAL"
+selected_count=`samtools view -F4 $selected -c`
+if [ ! -z "$ctrl" ]; then
+	ctrl_count=`samtools view -F4 $ctrl -c`
+fi
+
+if [ ! -z "$verbose" ]; then
+	echo "TOTAL_Selected:"$selected_count
+	echo "TOTAL_Ctrl:"$ctrl_count
+fi
+##RScript to do statistical test
+if [ -z "$ctrl" ]; then #without ctrl
+        echo -e "$RED""Import Data into R...""$NORMAL"
+        Rscript SliWin_noCtrl.R $output/$selected_plus $output/$selected_minus $genome $fdr $output $selected_count $anno $reads $verbose $method
+fi
+
+if [ ! -z "$ctrl" ]; then #with ctrl
+        echo -e "$RED""Import Data into R...""$NORMAL"
+        Rscript lib/SliWin_Ctrl.R $output/$selected_plus $output/$selected_minus $output/$ctrl_plus $output/$ctrl_minus $genome $fdr $reads $output $selected_count $ctrl_count $anno $cores $verbose $method
+fi
+ 
+
+
+

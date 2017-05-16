@@ -1,0 +1,192 @@
+#!/bin/bash
+#COUNT
+# 
+## This script is used to count inactivating insertions in genes. It takes the output from preProcess (optional if replicated and multiple-hit reads were not removed before), and could be followed by quality check (qc) or statisitcal test (VISITs_Gene)
+
+NORMAL="\\033[0;39m"
+RED="\\033[1;31m"
+BLUE="\\033[0;34m"
+
+## Check environment variable
+hash bedtools 2>/dev/null || { echo >&2 "bedtools is required, but not installed.  Aborting."; exit 1; }
+hash samtools 2>/dev/null || { echo >&2 "samtools is required, but not installed.  Aborting."; exit 1; }
+hash Rscript 2>/dev/null || { echo >&2 "R is required, but not installed.  Aborting."; exit 1; }
+
+
+function usage {
+    echo -e "$BLUE""Usage : ./count.sh [-e specifiy 3/5 End insertion] [-f input filename] [-a Annotation directory] [-i Inclusion Kb upstream] [-o Output directory] [-h display this Help]"
+    echo -e "$RED""Options"
+    echo -e "$BLUE""-e""$NORMAL" "[Default: 5] Count 5' end or 3' end insertion sites (Optional)"
+    echo -e "$BLUE""-f""$NORMAL" "a text file with input file path and name" "$RED""(Mandatory)""$NORMAL"
+    echo -e "$BLUE""-i""$NORMAL" "[Default: 0] Reads inserted into iKb upstream of the gene will also be included (Optional)"
+    echo -e "$BLUE""-a""$NORMAL" "Annotation file folder containing the three annotation file: GeneIntervalModel.bed, IntronGeneModel.bed and syntheticGeneModel.bed" "$RED""(Mandatory)""$NORMAL"
+    #echo -e "$BLUE""-i""$NORMAL" "Only needed when ctrl library is not available. A txt file composed of two columns: chromosome name and length seperated by tab (e.g., chr1       1000000); if not specified, scripts will try to retrieve information from bam file headers (Optional)"
+    echo -e "$BLUE""-o""$NORMAL" "Output folder which will include bed file of intersected insertion sites, list of siginiciant genes, bubble plot and RData" "$RED""(Mandatory)""$NORMAL"
+    echo -e "$BLUE""-v""$NORMAL" "print Verbose (Optional)"
+    echo -e "$BLUE""-h""$NORMAL" "<help>"
+    exit;
+}
+
+## Display Help
+if [ $# == 0 ]
+then
+	usage
+	exit
+fi
+
+case $1 in
+--h) usage ;;
+--help) usage ;;
+esac
+
+set -- $(getopt :e:f:i:a:o:vh "$@")
+while [ $# -gt 0 ]
+do
+    case "$1" in
+        (-e) end=$2; shift;;
+        (-f) input=$2; shift;;
+        (-i) inclusion=$2; shift;;
+        (-a) anno_dir=$2; shift;;
+        (-o) output=$2; shift;;
+        (-v) verbose=ture;;
+        (-h) usage; exit;;
+        (--) shift; break;;
+        (-*) echo "$0: error - unrecognized option $1" 1>&2; exit 1;;
+        (*)  break;;
+    esac
+    shift
+done
+#echo $verbose
+##Create Temp 
+#[[ ! -d temp ]] && mkdir temp
+
+## Check options
+if [ -z "$end" ]; then   #check insertion site
+    end=5
+fi
+if [ ! -r "$input" ]; then  #check input file option
+    echo "input file does not exist"
+    exit
+fi
+#if [ ! -r "$ctrl" ]; then  #check ctrl file option
+#    echo "You can specify a bam file as ctrl library by -c, if available"
+#    exit
+#fi
+if [ -z "$inclusion" ]; then   #check insertion site
+    inclusion=0
+    else
+    inclusion=$(echo "$inclusion * 1000"|bc)
+fi
+if [ ! -d "$output" ]; then  #check output folder option
+    echo "output directory does not exist"
+    exit
+fi
+if [ ! -d "$anno_dir" ]; then  #check annotation folder
+    echo "annotation directory does not exist"
+    exit
+fi
+if [ ! -r "$anno_dir/syntheticGeneModel.bed" ]; then  #check exon option
+    echo "Exon annotation file (bed/gff) does not exist, please check if file syntheticGeneModel.bed exists"
+    exit
+fi
+if [ ! -r "$anno_dir/IntronGeneModel.bed" ]; then  #check intron option
+    echo "Intron annotation file (bed/gff) does not exist, please check if file IntronGeneModel.bed exists"
+    exit
+fi
+if [ ! -r "$anno_dir/GeneIntervalModel.bed" ]; then  #check gene interval option
+	echo "Gene interval annotation does not exist, please check if file GeneIntervalModel.bed exists"
+	exit
+fi
+
+for bam in `awk '{if ($2 == -1 && $1 !~ /#/) print}' $input|cut -f1`
+do
+if [ ! -r "$bam" ]; then  #check gene interval option
+        echo $bam
+	echo "bam file specified in input file does not exist, please check"
+        exit
+fi
+done
+if [ ! -z $verbose ]; then
+	echo -e "$BLUE""Applying VISITs Counting by Gene Approach..."        
+	echo -e "END=$end INCLUSION=$inclusion INPUT=$input OUTPUT=$output ANNO_DIR=$anno_dir""$NORMAL"
+fi
+#####Generate Exon & Gene Interval Model with the elongation upstream to iKb 
+##Exon
+if [ $(echo "$inclusion >= 0" | bc) -eq 1 ]; then
+#if [[ $inclusion -gt 0 ]] then
+        if [[ ! -r "$anno_dir/syntheticGeneModel_$inclusion.bed" ]]; then
+                echo -e "$RED""Generating Gene Model with $inclusion bp upstream""$NORMAL"
+                awk -v inclusion="$inclusion" 'BEGIN {i=0;j=0} {OFS="\t";if ($5==1 && $6=="+") {$2=$2-inclusion; print $0; i=0; j=0}; \
+                if ($5==1 && $6=="-") {$3=$3+inclusion; print $0; i=0; j=0}  \
+                if ($5> 1 && $6=="-") {j=j+1; if (j==$5) {$3=$3+inclusion; j=0; print $0} else print $0}; \
+                if ($5> 1 && $6=="+") {i=i+1; if (i==1) {$2=$2-inclusion; print $0} else if (i==$5) {i=0; print $0} else print $0}}' $anno_dir/syntheticGeneModel.bed \
+                | awk '{OFS="\t"; if ($2 <0) {$2=0; print $0} else print}' > $anno_dir/syntheticGeneModel_$inclusion.bed
+        else
+                echo -e "$RED""Elongated syntheticGeneModel Already Existed, Skip""$NORMAL"
+        fi
+##Gene Interval
+	if [[ ! -r "$anno_dir/GeneIntervalModel_$inclusion.bed" ]]; then
+		awk -v inclusion="$inclusion" '{OFS="\t";if ($6 == "+") {$2=$2-inclusion; print $0};  if ($6 == "-") {$3=$3+inclusion; print $0}}' $anno_dir/GeneIntervalModel.bed \
+        	| awk '{OFS="\t"; if ($2 <0) {$2=0; print $0} else print}' > $anno_dir/GeneIntervalModel_$inclusion.bed
+        else
+                echo -e "$RED""Elongated GeneIntervalModel Already Existed, Skip""$NORMAL"
+        fi
+fi
+
+##Get only 5'/3' Insertion Site
+[[ ! -d $output/bed ]] && mkdir $output/bed
+for selected in `awk '{if ($2 == -1 && $1 !~ /#/) print}' $input|cut -f1`
+do
+if [ $end -eq 5 ]; then #keep only 5'-end for selected
+	selected_bed=`basename $selected | sed 's/.bam/.bed/'`
+	if [[ ! -r "$output/bed/$selected_bed" ]]; then
+		echo -e "$RED""Getting Insertion Sites for $selected Library...""$NORMAL"
+		bedtools bamtobed -i $selected |awk '{OFS="\t";if ($6=="+"&&$1!~/\_/) {$3=$2;print};if ($6=="-"&&$1!~/\_/){$2=$3;print}}' > $output/bed/$selected_bed
+	else	
+		echo -e "$RED""Independent Insertion Sites for $selected Library Already Existed, Skip""$NORMAL"
+	fi
+fi
+if [ $end -eq 3 ]; then #keep only 3'-end for selected
+	selected_bed=`basename $selected | sed 's/.bam/.bed/'`
+	if [[ ! -r "$output/bed/selected_bed" ]]; then 
+		echo -e "$RED""Getting Insertion Sites for $selected Library...""$NORMAL"
+		bedtools bamtobed -i $selected |awk '{OFS="\t";if ($6=="+"&&$1!~/\_/) {$2=$3;print};if ($6=="-"&&$1!~/\_/){$3=$2;print}}' > $output/bed/$selected_bed
+        else    
+                echo -e "$RED""Independent Insertion Sites for $selected Library Already Existed, Skip""$NORMAL"
+	fi
+fi
+done
+
+##Count Reads for Selected Library
+#Exon
+[[ ! -d $output/count ]] && mkdir $output/count
+[[ ! -d $output/temp ]] && mkdir $output/temp
+[[ -r "$output/temp/temp.bed" ]] && rm $output/temp/temp.bed	
+for selected_bed in $output/bed/*.bed
+do
+selected_exonCount=`basename $selected_bed| sed 's/.bed/.ExonCount.bed/'`
+if [[ ! -r "$output/count/$selected_exonCount" ]]; then
+	echo -e "$RED""Counting Insertion Sites for $selected_bed Library...""$NORMAL"
+	bedtools intersect -a $selected_bed -b $anno_dir/syntheticGeneModel_$inclusion.bed > $output/temp/temp.bed
+	bedtools coverage -a $output/temp/temp.bed -b $anno_dir/GeneIntervalModel_$inclusion.bed -counts > $output/count/$selected_exonCount
+else
+        echo -e "$RED""Counting for $selected Library Already Existed, Skip""$NORMAL"
+fi
+#SenseIntron
+[[ -r "$output/temp/temp.bed" ]] && rm $output/temp/temp.bed
+selected_intronCount=`basename $selected_bed| sed 's/.bed/.IntronCount.bed/'`
+if [[ ! -r "$output/count/$selected_intronCount" ]]; then
+	bedtools intersect -a $selected_bed -b $anno_dir/IntronGeneModel.bed -s > $output/temp/temp.bed
+	bedtools coverage -a $output/temp/temp.bed -b $anno_dir/GeneIntervalModel.bed -counts > $output/count/$selected_intronCount
+fi
+[[ -r "$output/temp/temp.bed" ]] && rm $output/temp/temp.bed
+#AntiSenseIntro
+selected_AntiIntronCount=`basename $selected_bed| sed 's/.bed/.AntiIntronCount.bed/'`
+if [[ ! -r "$output/count/$selected_AntiIntronCount" ]]; then
+        bedtools intersect -a $selected_bed -b $anno_dir/IntronGeneModel.bed -S > $output/temp/temp.bed
+        bedtools coverage -a $output/temp/temp.bed -b $anno_dir/GeneIntervalModel.bed -counts > $output/count/$selected_AntiIntronCount
+fi
+[[ -r "$output/temp/temp.bed" ]] && rm $output/temp/temp.bed
+done
+##Delete Temp file
+
