@@ -1,6 +1,10 @@
----
-output: html_document
----
+# VISITs
+VISITs is a bioinformatic framework designed for handling haploid screening data, including pre-processing, quality check, analyzing, and visualization.
+
+##Citation
+`2017`
+__Yu J__, Ciaudo C: Vector Integration Sites Identification for Gene-Trap Screening in Mammalian Haploid Cells. _Scientific reports_, [10.1038/srep44736](https://www.nature.com/articles/srep44736)
+
 # Prerequisits and Installation
 The VISITs pipeline runs on Linux. It requires following softwares:
 
@@ -69,7 +73,7 @@ Please make sure that you have the full read/write/execute permission in all the
 
 # USAGE 
 ## Overview 
-The pipeline of VISITs is shown as follows. VISITs is a bioinformatic framework designed for handling haploid screening data, including pre-processing, quality check, analyzing, and visualization. All these modules could be run independently except visualization, which is based on the output from others.
+The pipeline of VISITs is shown as follows. All these modules could be run independently except visualization, which is based on the output from others.
 
 ![](Fig/Pipeline.png) 
 
