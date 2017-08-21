@@ -1,7 +1,7 @@
 # VISITs
 VISITs is a bioinformatic framework designed for handling haploid screening data, including pre-processing, quality check, analyzing, and visualization.
 
-##Citation
+## Citation
 `2017`
 __Yu J__, Ciaudo C: Vector Integration Sites Identification for Gene-Trap Screening in Mammalian Haploid Cells. _Scientific reports_, [10.1038/srep44736](https://www.nature.com/articles/srep44736)
 
