@@ -126,6 +126,7 @@ biomart <- useMart("ensembl","hsapiens_gene_ensembl")
 } else if (!is.na(grep("ENSMUSG", selected.sig[1,1]) || grep("ENSMUST", selected.sig[1,1]))) { 
 biomart <- useMart("ensembl","mmusculus_gene_ensembl") 
 }
+
 for (x in 1:length(bedfile))  {
 bedfile[[x]]$V5 <- rnorm(nrow(bedfile[[x]]), mean=0, sd=0.1)
 }
@@ -134,11 +135,11 @@ temp <- bplapply(1:number, function(i) {
 start = ifelse(selected.sig[i,"strand"] == "+", selected.sig[i,"start"] - include, selected.sig[i,"start"])
 end = ifelse(selected.sig[i,"strand"] == "-", selected.sig[i,"end"] + include, selected.sig[i,"end"])
 pList_plus <- lapply(1:length(bedfile), function(x) {
-makeBaseTrack(base = subset(bedfile[[x]], V6 == "+")[,2] , value = subset(bedfile[[x]],V6 == "+")[,5], strand = "+",
+makeBaseTrack(base = subset(bedfile[[x]], V6 == "+" & V1 == as.character(selected.sig[i, "chr"]))[,2] , value = subset(bedfile[[x]],V6 == "+" & V1 == as.character(selected.sig[i, "chr"]))[,5], strand = "+",
         dp = DisplayPars(lwd = .2, color = x, ylim = c(-1,1)))
 })
 pList_minus <- lapply(1:length(bedfile), function(x) {
-makeBaseTrack(base = subset(bedfile[[x]], V6 == "-")[,2] , value = subset(bedfile[[x]],V6 == "-")[,5], strand = "-",
+makeBaseTrack(base = subset(bedfile[[x]], V6 == "-" & V1 == as.character(selected.sig[i, "chr"]))[,2] , value = subset(bedfile[[x]],V6 == "-" & V1 == as.character(selected.sig[i, "chr"]))[,5], strand = "-",
         dp = DisplayPars(lwd = .2, color = x, ylim = c(-1,1)))
 })
 pList <- sapply(1:length(bedfile), function(x) {

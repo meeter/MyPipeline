@@ -28,7 +28,7 @@ then
     exit
 fi
 ## Get options
-set -- $(getopt :i:o:t:hmd: "$@")
+set -- $(getopt :i:o:t:y:hmd: "$@")
 while [ $# -gt 0 ]
 do
     case "$1" in
@@ -52,10 +52,6 @@ if [ -z "$RM_DUP" -a -z "$RM_MULTI" ]; then  #check -m -d
     echo "You must specify at least one option"
     exit
 fi
-#if [ -z "$RM_Y" ]; then  #check output file option
-#    RM_Y=Y
-#    exit
-#fi
 if [ -z "$RM_Y" ]; then   #check if RM_Y
 	RM_Y="Y"
 fi
@@ -128,12 +124,12 @@ if [ $RM_DUP ]; then
 	fi
 	echo -e "$RED""Split data into Plus/Minus Reads...""$NORMAL"
 	#sort bam file
-	samtools sort -@ $threads .temp/$plus .temp/$plus.sorted
-	mv .temp/$plus.sorted.bam .temp/$plus
+	samtools sort -@ $threads .temp/$plus -o .temp/$plus.sorted
+	mv .temp/$plus.sorted .temp/$plus
 	num_plus=`samtools view -c .temp/$plus`
 	echo -e "$RED""Plus Reads Generated""$NORMAL"
-	samtools sort -@ $threads .temp/$minus .temp/$minus.sorted
-	mv .temp/$minus.sorted.bam .temp/$minus
+	samtools sort -@ $threads .temp/$minus -o .temp/$minus.sorted
+	mv .temp/$minus.sorted .temp/$minus
 	num_minus=`samtools view -c .temp/$minus`
 	echo -e "$RED""Minus Reads Generated""$NORMAL" 
 	#remove duplication
@@ -161,7 +157,7 @@ if [ $RM_DUP ]; then
 	echo -e "$RED""Plus/ Minus Reads Merged""$NORMAL"
 fi	
 #sort merged bam file
-samtools sort -@ $threads .temp/nodup_`basename $input` .temp/nodup_sorted.`basename $input|sed 's/.bam//'`
+samtools sort -@ $threads .temp/nodup_`basename $input` -o .temp/nodup_sorted.`basename $input`
 echo -e "$RED""Sorting complete""$NORMAL"
 #check chromosome name, add prefix "chr" if not included (when using ref fasta from ensembl)
 samtools view -h .temp/nodup_sorted.`basename $input` | awk '{OFS="\t"; if (NF == 3 && $2 ~/SN/ && $2 !~/chr/) {sub(/SN:/,"SN:chr")};if ($1 !~/@PG/ && $3 !~/chr/ && NF >4) {$3="chr"$3};if ($2 ~/chrMT/ || $3 ~/chrMT/) {sub(/chrMT/,"chrM")}; print}' |samtools view -Sb - > $output 
@@ -171,7 +167,7 @@ samtools view -h .temp/nodup_sorted.`basename $input` | awk '{OFS="\t"; if (NF =
 if [ $RM_Y == Y ]; then
 	echo  -e "$RED""Removing reads in ChrY""$NORMAL"
 	outputTemp=`basename $output`
-	samtools view -h $output|awk '{OFS="\t"; if ($2 !~ /chrY/ && $3 !~ /chrY/) print}'|samtools view -Sb - > .temp/$outputTemp
+	samtools view -h $output|awk '{OFS="\t"; if ($2 !~ /chrY/ && $3 !~ /chrY/ && $2 !~ /chrM/ && $3 !~ /chrM/) print}'|samtools view -Sb - > .temp/$outputTemp
 	mv .temp/$outputTemp $output
 fi
 
